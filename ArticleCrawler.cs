@@ -55,7 +55,7 @@ public class ArticleCrawler
   private async Task CrawlAsync() {
     List<Article> newly_loaded_articles = new();
 
-    while((UInt64)stream.Length < max_size)
+    while((UInt64)stream.Length < max_size && loaded_articles.Count != 0)
     {
       foreach(Article article in loaded_articles)
       {
