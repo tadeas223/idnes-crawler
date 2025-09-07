@@ -18,7 +18,7 @@ public class Article
     var category_div = document.GetElementsByClassName("tag-list");
     if(category_div.Length == 0) 
     {
-      throw new Exception("categories not found"); 
+      return new string[0];
     }
 
   
@@ -66,8 +66,8 @@ public class Article
         }
       }
     }
-
-    throw new Exception("comments not found");
+  
+    return 0;
   }
 
   public static int GetImages(IDocument document)
@@ -149,5 +149,35 @@ public class Article
 
     return article;
   }
+  
+  public static async Task<string[]> GetIdnesUrls(string html)
+  {
+    var config = Configuration.Default;
+    var context = BrowsingContext.New(config);
+    
+    var document = await context.OpenAsync(req => req.Content(html).Header("Content-Type", "text/html; charset=utf-8"));
+        
+    var url_elements = document.GetElementsByTagName("a");
+    List<string> urls = new(); 
+    foreach(var e in url_elements) {
+      string? url = e.GetAttribute("href");
+      if(url != null && url.Contains("www.idnes.cz") 
+          && !url.Contains(".jpg")
+          && !url.Contains("/premium/") 
+          && !url.Contains("/ucet/") 
+          && !url.EndsWith("/diskuse") 
+          && !url.EndsWith("/foto") 
+          && url.Contains("https://"))
+      {
+        if(url.Contains('?'))
+        {
+          int index = url.IndexOf('?');
+          url = url.Substring(0, index);
+        }
+        urls.Add(url);
+      } 
+    }
 
+    return urls.ToArray();
+  }
 }

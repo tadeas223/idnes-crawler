@@ -1,20 +1,35 @@
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 public class ArticleCrawler
 {
-  private List<string> visited_urls = new();
+  private int written = 0;
+  private int depth = 0;
+
+  private int next_depth_size = 0;
+  private int article_counter = 0;
+
+  private Object depth_lock = new();
+  
+  private SemaphoreSlim semaphore;
+
+  private ConcurrentDictionary<string, byte> visited_urls = new();
+  private HashSet<string> will_visit_urls = new();
+
+  public int MaxDepthSize {get;set;}
+  public int MaxTasks {get; set;}
+  public UInt64 MaxSize {get; set;}
+  public string InitialUrl {get;set;}
+  public Log Log {get;set;}
+
   private List<Article> loaded_articles = new();
   private FileStream stream;
   private Utf8JsonWriter writer;
-  private UInt64 max_size;
-  private int max_tasks;
-  private string initial_url;
-  private Log log;
   
   private Object visted_urls_lock = new Object();
-  public ArticleCrawler(string initial_url, string file_path, UInt64 max_size, int max_tasks, Log log)
+  public ArticleCrawler(string initial_url, string file_path)
   {
-    this.log = log;
+    InitialUrl = initial_url;
 
     stream = new FileStream(file_path, FileMode.Create);
     writer = new Utf8JsonWriter(stream, new JsonWriterOptions 
@@ -23,25 +38,132 @@ public class ArticleCrawler
       Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     });
 
-    this.max_size = max_size;
-    this.max_tasks = max_tasks;
-    this.initial_url = initial_url;
+    MaxTasks= 10;
+    MaxSize = 5 * 1024 * 1024; // 5 Mb default size
+    Log = new Log(0);
+    MaxDepthSize = 500;
+
+    semaphore = new SemaphoreSlim(MaxTasks);
   }
 
   public async Task Run() 
   {
-    await CrawlPrepareAsync();
+    CrawlPrepare();
 
     await CrawlAsync();
   }
 
-  private async Task CrawlPrepareAsync()
+  private void CrawlPrepare()
   {
     writer.WriteStartArray();
-    
-    Article article = await LoadArticleAsync(initial_url);
-    loaded_articles.Add(article);
-    WriteArticle(article);
+    will_visit_urls.Add(InitialUrl);
+  }
+
+  private async Task CrawlAsync()
+  {
+    Object write_lock = new Object();
+    while((UInt64)stream.Length < MaxSize && will_visit_urls.Count > 0)
+    {
+      depth++;
+      article_counter = 0;
+      next_depth_size = 0;
+      var tasks = will_visit_urls.Select(async url =>
+      {
+        await semaphore.WaitAsync();
+        try
+        {
+          await Task.Delay(Random.Shared.Next(500, 5000)); 
+          HashSet<string> next_visit_urls = new();
+          
+          HttpRetriever retriever = new("https://www.idnes.cz");
+          
+          string html;
+          try
+          {
+            html = await retriever.GetHtmlAsync(url);
+          }
+          catch
+          {
+            throw new Exception("failed to load url");
+          }
+
+          List<string> next_urls = new();
+          try
+          {
+            next_urls = (await Article.GetIdnesUrls(html)).ToList();
+          }
+          catch
+          {
+
+          }
+          
+          foreach(string next_url in next_urls)
+          {
+            lock(depth_lock)
+            {
+              if(!visited_urls.ContainsKey(next_url) && next_depth_size <= MaxDepthSize)
+              {
+                next_visit_urls.Add(next_url);
+                next_depth_size++;
+              }
+            }
+          }
+          
+          try
+          {
+            Article article = await Article.FromHtmlAsync(html);
+            lock(write_lock)
+            {
+              try
+              {
+                WriteArticle(article);
+                written++;
+              }
+              catch
+              {
+                
+              }
+            }
+              
+          }
+          catch
+          {
+
+          }          
+
+          visited_urls.TryAdd(url, 0);
+          
+          article_counter++;
+          Log.WriteLine(url, 2);
+          Log.WriteLine("links: " + article_counter + "/" + will_visit_urls.Count, 2);
+          Log.WriteLine("depth: " + depth, 2);
+          Log.WriteLine("next depth size: " + next_depth_size, 2);
+          Log.WriteLine("written: " + written, 2);
+          Log.WriteLine("visited urls: " + visited_urls.Count, 2);
+          Log.WriteLine("file size: " + ((float)stream.Length / 1024f / 1024f / 1024f) + " GB", 2);
+          return next_visit_urls;
+        }
+        catch {
+          Log.WriteLine("BAD ERROR", 1);
+          return new HashSet<string>();
+        }
+        finally
+        {
+          semaphore.Release();
+        }
+      });
+
+      HashSet<string>[] next_visit = await Task.WhenAll(tasks);
+      will_visit_urls.Clear();
+      foreach (var hash_set in next_visit)
+      {
+        foreach(var value in hash_set)
+        {
+          will_visit_urls.Add(value);
+        }
+      }
+
+    }
   }
 
   private async Task EndAsync()
@@ -49,124 +171,7 @@ public class ArticleCrawler
     writer!.WriteEndArray();
     await writer.DisposeAsync();
     await stream.DisposeAsync();
-    log.WriteLine("finished", 1);
-  }
-
-  private async Task CrawlAsync() {
-    List<Article> newly_loaded_articles = new();
-
-    while((UInt64)stream.Length < max_size && loaded_articles.Count != 0)
-    {
-      foreach(Article article in loaded_articles)
-      {
-        if(article.Title == "failed") continue;
-        
-        log.WriteLine("\n" + article.Title!, 2);
-
-        List<string> urls = article.Urls!;
-        List<string> new_urls = new();
-
-        foreach(string url in urls)
-        {
-          if(!visited_urls.Contains(url))
-          {
-            new_urls.Add(url);
-          }
-        }
-
-        if(new_urls.Count == 0)
-        {
-          continue;
-        }
-        
-        await Task.Delay(3000);
-        Article[] new_articles = await LoadArticlesAsync(new_urls.ToArray<string>());
-        
-        int found_good_articles = 0;
-        foreach(Article new_article in new_articles)
-        {
-          if(new_article.Title == "failed") continue;
-          
-          found_good_articles++;
-
-          log.WriteLine("    -> " + new_article.Title!, 2);
-          WriteArticle(new_article);
-
-          if((UInt64)stream.Length > max_size)
-          {
-            await EndAsync();
-            return;
-          }
-        }
-
-        newly_loaded_articles.AddRange(new_articles);
-        log.WriteLine("\nfile size: " + ((float)stream.Length / 1024f / 1024f / 1024f) + " Gb\n", 1);
-        log.WriteLine("all links " + visited_urls.Count, 3);
-        log.WriteLine("currently found articles " + found_good_articles, 3);
-      }
-
-
-      loaded_articles.Clear();
-      loaded_articles.AddRange(newly_loaded_articles);
-    }
-  }
-
-  private async Task<Article[]> LoadArticlesAsync(string[] urls)
-  {
-    SemaphoreSlim semaphore = new SemaphoreSlim(max_tasks);
-    var tasks = urls.Select(async url =>
-    {
-      await semaphore.WaitAsync();
-      Article article; 
-      try
-      {
-        article = await LoadArticleAsync(url);
-      }
-      catch 
-      {
-        article = new Article {Title = "failed"};
-      }
-
-      semaphore.Release();
-      
-      return article;
-    });
-
-    Article[] articles = await Task.WhenAll(tasks);
-    return articles;
-  }
-
-  private async Task<Article> LoadArticleAsync(string url)
-  {
-    bool contains_url = false;
-    lock(visted_urls_lock)
-    {
-      if(visited_urls.Contains(url))
-      {
-        contains_url = true;
-      }
-    }
-    
-    Article article = new();
-    if(contains_url)
-    {
-      article.Title = "failed";  
-    }
-    else
-    {
-      try
-      {
-        article = await GetArticleAsync(url);
-      } catch {
-        article.Title = "failed";  
-      }
-    }
-    
-    lock(visted_urls_lock)
-    {
-      visited_urls.Add(url);
-    }
-    return article;
+    Log.WriteLine("finished", 1);
   }
 
   private void WriteArticle(Article article)
@@ -199,13 +204,21 @@ public class ArticleCrawler
         stream.Flush();
   }
   
-    private async Task<Article> GetArticleAsync(string url)
+  private async Task<Article> GetArticleAsync(string url)
   {
     HttpRetriever retriever = new HttpRetriever("https://idnes.cz");
     string html = await retriever.GetHtmlAsync(url);
-    log.WriteLine("---------------html-------------------", 10);
-    log.WriteLine(html, 10);
-    log.WriteLine("---------------html-------------------", 10);
+    Log.WriteLine("---------------html-------------------", 10);
+    Log.WriteLine(html, 10);
+    Log.WriteLine("---------------html-------------------", 10);
     return await Article.FromHtmlAsync(html);
   }
+
+  private async Task<List<string>> GetUrlsAsync(string url)
+  {
+    HttpRetriever retriever = new HttpRetriever("https://idnes.cz");
+    string html = await retriever.GetHtmlAsync(url);
+    return (await Article.GetIdnesUrls(html)).ToList();
+  }
+
 }

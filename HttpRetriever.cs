@@ -18,7 +18,7 @@ public class HttpRetriever
     handler.CookieContainer ??= new CookieContainer();
     client = new HttpClient(handler)
     {
-      Timeout = TimeSpan.FromSeconds(3)
+      Timeout = TimeSpan.FromSeconds(10)
     };
   }
 
