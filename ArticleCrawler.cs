@@ -72,6 +72,11 @@ public class ArticleCrawler
         await semaphore.WaitAsync();
         try
         {
+          if((UInt64)stream.Length > MaxSize)
+          {
+            return new HashSet<string>();
+          }
+
           await Task.Delay(Random.Shared.Next(500, 5000)); 
           HashSet<string> next_visit_urls = new();
           
@@ -164,6 +169,8 @@ public class ArticleCrawler
       }
 
     }
+
+    await EndAsync();
   }
 
   private async Task EndAsync()
