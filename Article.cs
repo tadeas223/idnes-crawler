@@ -163,10 +163,14 @@ public class Article
       string? url = e.GetAttribute("href");
       if(url != null && url.Contains("www.idnes.cz") 
           && !url.Contains(".jpg")
+          && !url.Contains(".JPG")
+          && !url.Contains("/databanka")
           && !url.Contains("/premium/") 
+          && !url.Contains("/foto") 
+          && !url.Contains("/databanka") 
           && !url.Contains("/ucet/") 
           && !url.EndsWith("/diskuse") 
-          && !url.EndsWith("/foto") 
+          && url.Length > 70
           && url.Contains("https://"))
       {
         if(url.Contains('?'))

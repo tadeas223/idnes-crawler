@@ -4,17 +4,11 @@ using System.Collections.Concurrent;
 public class ArticleCrawler
 {
   private int written = 0;
-  private int depth = 0;
-
-  private int next_depth_size = 0;
-  private int article_counter = 0;
-
-  private Object depth_lock = new();
   
   private SemaphoreSlim semaphore;
 
   private ConcurrentDictionary<string, byte> visited_urls = new();
-  private HashSet<string> will_visit_urls = new();
+  private ConcurrentDictionary<string, byte> will_visit_urls = new();
 
   public int MaxDepthSize {get;set;}
   public int MaxTasks {get; set;}
@@ -56,7 +50,7 @@ public class ArticleCrawler
   private void CrawlPrepare()
   {
     writer.WriteStartArray();
-    will_visit_urls.Add(InitialUrl);
+    will_visit_urls.TryAdd(InitialUrl, 0);
   }
 
   private async Task CrawlAsync()
@@ -64,28 +58,26 @@ public class ArticleCrawler
     Object write_lock = new Object();
     while((UInt64)stream.Length < MaxSize && will_visit_urls.Count > 0)
     {
-      depth++;
-      article_counter = 0;
-      next_depth_size = 0;
       var tasks = will_visit_urls.Select(async url =>
       {
         await semaphore.WaitAsync();
+        await Task.Delay(Random.Shared.Next(500, 1000));
+        byte uaoi;
+        will_visit_urls.Remove(url.Key, out uaoi);
+
         try
         {
           if((UInt64)stream.Length > MaxSize)
           {
-            return new HashSet<string>();
+            return;
           }
 
-          await Task.Delay(Random.Shared.Next(500, 5000)); 
-          HashSet<string> next_visit_urls = new();
-          
           HttpRetriever retriever = new("https://www.idnes.cz");
           
           string html;
           try
           {
-            html = await retriever.GetHtmlAsync(url);
+            html = await retriever.GetHtmlAsync(url.Key);
           }
           catch
           {
@@ -104,13 +96,9 @@ public class ArticleCrawler
           
           foreach(string next_url in next_urls)
           {
-            lock(depth_lock)
+            if(will_visit_urls.Count <= MaxDepthSize)
             {
-              if(!visited_urls.ContainsKey(next_url) && next_depth_size <= MaxDepthSize)
-              {
-                next_visit_urls.Add(next_url);
-                next_depth_size++;
-              }
+              will_visit_urls.TryAdd(next_url, 0);
             }
           }
           
@@ -136,40 +124,31 @@ public class ArticleCrawler
 
           }          
 
-          visited_urls.TryAdd(url, 0);
+          visited_urls.TryAdd(url.Key, 0);
           
-          article_counter++;
-          Log.WriteLine(url, 2);
-          Log.WriteLine("links: " + article_counter + "/" + will_visit_urls.Count, 2);
-          Log.WriteLine("depth: " + depth, 2);
-          Log.WriteLine("next depth size: " + next_depth_size, 2);
+          Log.WriteLine(url.Key, 2);
+          Log.WriteLine("url pool: " + will_visit_urls.Count, 2);
           Log.WriteLine("written: " + written, 2);
           Log.WriteLine("visited urls: " + visited_urls.Count, 2);
           Log.WriteLine("file size: " + ((float)stream.Length / 1024f / 1024f / 1024f) + " GB", 2);
-          return next_visit_urls;
         }
         catch {
           Log.WriteLine("BAD ERROR", 1);
-          return new HashSet<string>();
+          return;
         }
         finally
         {
+          if(written % 500 == 0) {
+            writer.Flush();
+            stream.Flush();
+          }
           semaphore.Release();
         }
       });
-
-      HashSet<string>[] next_visit = await Task.WhenAll(tasks);
-      will_visit_urls.Clear();
-      foreach (var hash_set in next_visit)
-      {
-        foreach(var value in hash_set)
-        {
-          will_visit_urls.Add(value);
-        }
-      }
-
+    
+      await Task.WhenAll(tasks);
     }
-
+    
     await EndAsync();
   }
 
@@ -207,8 +186,6 @@ public class ArticleCrawler
         writer.WriteString("Date", article.Date.ToString("O"));
 
         writer.WriteEndObject();
-        writer.Flush();
-        stream.Flush();
   }
   
   private async Task<Article> GetArticleAsync(string url)
