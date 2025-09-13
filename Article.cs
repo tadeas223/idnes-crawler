@@ -6,6 +6,7 @@ public class Article
 {
   public string? Title {get; set;}
   public string[]? Categories {get; set;}
+  public string ?Url {get; set;}
   public int Comments {get; set;}
   public int Images {get; set;}
   public string ?Content {get; set;}
@@ -130,7 +131,7 @@ public class Article
     return urls;
   }
 
-  public async static Task<Article> FromHtmlAsync(string html)
+  public async static Task<Article> FromHtmlAsync(string html, string url)
   {
     Article article = new Article();
     
@@ -146,6 +147,7 @@ public class Article
     article.Content = GetContent(document);
     article.Date = GetDate(document);
     article.Urls = GetUrls(document);
+    article.Url = url;
 
     return article;
   }

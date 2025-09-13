@@ -62,8 +62,10 @@ public class ArticleCrawler
       {
         await semaphore.WaitAsync();
         await Task.Delay(Random.Shared.Next(500, 1000));
+       
         byte uaoi;
         will_visit_urls.Remove(url.Key, out uaoi);
+        visited_urls.TryAdd(url.Key, 0);
 
         try
         {
@@ -96,7 +98,7 @@ public class ArticleCrawler
           
           foreach(string next_url in next_urls)
           {
-            if(will_visit_urls.Count <= MaxDepthSize)
+            if(will_visit_urls.Count <= MaxDepthSize && !visited_urls.ContainsKey(next_url))
             {
               will_visit_urls.TryAdd(next_url, 0);
             }
@@ -104,7 +106,7 @@ public class ArticleCrawler
           
           try
           {
-            Article article = await Article.FromHtmlAsync(html);
+            Article article = await Article.FromHtmlAsync(html, url.Key);
             lock(write_lock)
             {
               try
@@ -123,8 +125,6 @@ public class ArticleCrawler
           {
 
           }          
-
-          visited_urls.TryAdd(url.Key, 0);
           
           Log.WriteLine(url.Key, 2);
           Log.WriteLine("url pool: " + will_visit_urls.Count, 2);
@@ -163,6 +163,9 @@ public class ArticleCrawler
   private void WriteArticle(Article article)
   {
         writer.WriteStartObject();
+        if(article.Url != null) {
+          writer.WriteString("Url", article.Url); 
+        }
 
         if (article.Title != null)
             writer.WriteString("Title", article.Title);
@@ -195,7 +198,7 @@ public class ArticleCrawler
     Log.WriteLine("---------------html-------------------", 10);
     Log.WriteLine(html, 10);
     Log.WriteLine("---------------html-------------------", 10);
-    return await Article.FromHtmlAsync(html);
+    return await Article.FromHtmlAsync(html, url);
   }
 
   private async Task<List<string>> GetUrlsAsync(string url)
