@@ -168,6 +168,7 @@ public class Article
           && !url.Contains("/premium/") 
           && !url.Contains("/foto") 
           && !url.Contains("/databanka") 
+          && !url.Contains("online-") 
           && !url.Contains("/ucet/") 
           && !url.EndsWith("/diskuse") 
           && url.Length > 70

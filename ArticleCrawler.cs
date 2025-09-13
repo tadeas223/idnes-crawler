@@ -138,7 +138,7 @@ public class ArticleCrawler
         }
         finally
         {
-          if(written % 500 == 0) {
+          if(written % 100 == 0) {
             writer.Flush();
             stream.Flush();
           }
