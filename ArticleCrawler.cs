@@ -134,6 +134,8 @@ public class ArticleCrawler
         }
         catch {
           Log.WriteLine("BAD ERROR", 1);
+          // make idnes happy again :)
+          await Task.Delay(1000);
           return;
         }
         finally
