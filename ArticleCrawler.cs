@@ -6,6 +6,7 @@ public class ArticleCrawler
   private int written = 0;
   
   private SemaphoreSlim semaphore;
+  private ManualResetEventSlim stop_event;
 
   private ConcurrentDictionary<string, byte> visited_urls = new();
   private ConcurrentDictionary<string, byte> will_visit_urls = new();
@@ -38,6 +39,7 @@ public class ArticleCrawler
     MaxDepthSize = 500;
 
     semaphore = new SemaphoreSlim(MaxTasks);
+    stop_event = new ManualResetEventSlim(true);
   }
 
   public async Task Run() 
@@ -60,8 +62,9 @@ public class ArticleCrawler
     {
       var tasks = will_visit_urls.Select(async url =>
       {
+        stop_event.Wait();
         await semaphore.WaitAsync();
-        await Task.Delay(Random.Shared.Next(500, 1000));
+        await Task.Delay(Random.Shared.Next(200, 800));
        
         byte uaoi;
         will_visit_urls.Remove(url.Key, out uaoi);
@@ -93,6 +96,10 @@ public class ArticleCrawler
           }
           catch
           {
+            stop_event.Reset();
+            Console.WriteLine("BAD ERROR :(");
+            await Task.Delay(10000);
+            stop_event.Set();
 
           }
           
@@ -136,6 +143,7 @@ public class ArticleCrawler
           Log.WriteLine("BAD ERROR", 1);
           // make idnes happy again :)
           await Task.Delay(1000);
+          return;
           return;
         }
         finally

@@ -3,7 +3,7 @@
   Log = new Log(3),
   MaxSize = ((UInt64)3 * 1024 * 1024 * 1024),
   MaxDepthSize = 10000,
-  MaxTasks = 10 
+  MaxTasks = 10
 };
 
 await crawler.Run();
